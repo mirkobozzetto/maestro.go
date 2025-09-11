@@ -50,11 +50,12 @@ run: build
 
 proto:
 	@echo "Generating protobuf files..."
-	@mkdir -p pkg/proto
+	@which protoc > /dev/null || (echo "Error: protoc not installed. Run 'brew install protobuf' or see https://grpc.io/docs/protoc-installation/" && exit 1)
+	@echo "Generating from pkg/proto/*.proto files..."
 	protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/*.proto
-	@echo "Protobuf generation complete"
+		pkg/proto/*.proto
+	@echo "✅ Protobuf generation complete"
 
 clean:
 	@echo "Cleaning build artifacts..."

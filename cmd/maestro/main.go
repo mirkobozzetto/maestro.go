@@ -126,6 +126,16 @@ func executeWorkflow(workflowFile, inputJSON string) {
 		logger.Fatal().Err(err).Msg("Failed to load workflow")
 	}
 
+	workflows := orch.ListWorkflows()
+	if len(workflows) == 0 {
+		logger.Fatal().Msg("No workflows loaded")
+	}
+	workflowName := workflows[0]
+
+	logger.Info().
+		Str("workflow", workflowName).
+		Msg("Workflow loaded successfully")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -137,12 +147,10 @@ func executeWorkflow(workflowFile, inputJSON string) {
 		cancel()
 	}()
 
-	workflowName := getWorkflowName(workflowFile)
 	result, err := orch.ExecuteWorkflow(ctx, workflowName, input)
 	if err != nil {
 		logger.Error().
 			Err(err).
-			Str("status", result.Status.String()).
 			Msg("Workflow execution failed")
 		os.Exit(1)
 	}
@@ -164,7 +172,7 @@ func serveOrchestrator(port int) {
 	logger := log.With().Str("command", "serve").Logger()
 	logger.Info().Int("port", port).Msg("Starting orchestrator server")
 
-	fmt.Printf("\n🚀 Maestro Orchestrator Server\n")
+	fmt.Printf("\n Maestro Orchestrator Server\n")
 	fmt.Printf("   Listening on port %d\n", port)
 	fmt.Printf("   Press Ctrl+C to stop\n\n")
 
@@ -188,26 +196,4 @@ func validateWorkflow(workflowFile string) {
 
 	logger.Info().Msg("✅ Workflow is valid")
 	fmt.Println("✅ Workflow validation successful")
-}
-
-func getWorkflowName(workflowFile string) string {
-	for i := len(workflowFile) - 1; i >= 0; i-- {
-		if workflowFile[i] == '/' {
-			name := workflowFile[i+1:]
-			if len(name) > 5 && name[len(name)-5:] == ".yaml" {
-				return name[:len(name)-5]
-			}
-			if len(name) > 4 && name[len(name)-4:] == ".yml" {
-				return name[:len(name)-4]
-			}
-			return name
-		}
-	}
-	if len(workflowFile) > 5 && workflowFile[len(workflowFile)-5:] == ".yaml" {
-		return workflowFile[:len(workflowFile)-5]
-	}
-	if len(workflowFile) > 4 && workflowFile[len(workflowFile)-4:] == ".yml" {
-		return workflowFile[:len(workflowFile)-4]
-	}
-	return workflowFile
 }
