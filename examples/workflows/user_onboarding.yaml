@@ -1,0 +1,81 @@
+name: user_onboarding
+version: "1.0"
+timeout: 30s
+
+services:
+  auth:
+    type: grpc
+    endpoint: "localhost:50051"
+    timeout: 5s
+    retry:
+      attempts: 3
+      backoff: exponential
+
+  billing:
+    type: grpc
+    endpoint: "localhost:50052"
+    timeout: 10s
+    retry:
+      attempts: 3
+      backoff: exponential
+
+  email:
+    type: http
+    endpoint: "http://localhost:3000"
+    timeout: 5s
+
+steps:
+  - id: create_user
+    service: auth
+    method: CreateUser
+    input:
+      email: "{{ .input.email }}"
+      name: "{{ .input.name }}"
+      password: "{{ .input.password }}"
+    output: user
+    compensate:
+      method: DeleteUser
+      input:
+        user_id: "{{ .user.id }}"
+
+  - parallel:
+      - id: setup_billing
+        service: billing
+        method: CreateCustomer
+        input:
+          user_id: "{{ .user.id }}"
+          email: "{{ .input.email }}"
+          plan: "{{ .input.plan }}"
+        output: customer
+        compensate:
+          method: DeleteCustomer
+          input:
+            customer_id: "{{ .customer.id }}"
+
+      - id: send_welcome_email
+        service: email
+        method: SendTemplate
+        input:
+          to: "{{ .input.email }}"
+          template: "welcome"
+          data:
+            name: "{{ .input.name }}"
+            user_id: "{{ .user.id }}"
+
+  - id: activate_premium
+    when: "{{ .input.plan == 'premium' }}"
+    service: billing
+    method: ActivatePremiumFeatures
+    input:
+      customer_id: "{{ .customer.id }}"
+      features:
+        - unlimited_storage
+        - priority_support
+        - advanced_analytics
+    output: premium_status
+
+output:
+  user_id: "{{ .user.id }}"
+  customer_id: "{{ .customer.id }}"
+  status: "onboarded"
+  welcome_email_sent: true
