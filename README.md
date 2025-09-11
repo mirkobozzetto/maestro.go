@@ -31,11 +31,14 @@ make test
 # Build
 make build
 
-# Execute workflow
-./maestro execute payment-workflow.yaml --input '{"order_id":"ORD-2024-001","amount":299.99}'
-
-# Start server mode
+# Start orchestrator server
 ./maestro serve --port 8080
+
+# Validate a workflow
+./maestro validate workflow.yaml
+
+# Execute workflow with input file
+./maestro execute workflow.yaml --input-file input.json
 ```
 
 ## Use Case Example
@@ -50,15 +53,15 @@ services:
   auth_service:
     type: grpc
     endpoint: "auth-service:50051"
-    
+
   billing_service:
     type: grpc
     endpoint: "billing-service:50052"
-    
+
   crm_service:
     type: http
     endpoint: "http://crm-api:8080"
-    
+
   email_service:
     type: grpc
     endpoint: "email-service:50053"
@@ -71,7 +74,7 @@ steps:
       email: "{{ .input.email }}"
       password: "{{ .input.password }}"
     output: user
-    
+
   - id: setup_subscription
     service: billing_service
     method: CreateSubscription
@@ -83,7 +86,7 @@ steps:
       method: CancelSubscription
       input:
         subscription_id: "{{ .subscription.id }}"
-    
+
   - id: add_to_crm
     service: crm_service
     method: POST /contacts
@@ -94,7 +97,7 @@ steps:
     output: crm_contact
     compensate:
       method: DELETE /contacts/{{ .crm_contact.id }}
-    
+
   - id: send_welcome_email
     service: email_service
     method: SendTemplate
