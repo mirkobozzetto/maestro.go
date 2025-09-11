@@ -138,3 +138,14 @@ make proto
 # Run benchmarks
 make bench
 ```
+
+## Status
+
+This project is under active development and evolves based on real-world usage. Feel free to:
+
+- Open issues with questions or suggestions
+- Submit pull requests
+- Fork and adapt it to your needs
+- Share your use cases
+
+Your feedback helps shape the project. Don't hesitate to reach out!
