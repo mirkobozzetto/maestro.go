@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/maestro/maestro.go/internal/adapters"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -142,18 +143,26 @@ func (c *DynamicClient) invokeHTTP(
 	workflowID string,
 	stepID string,
 ) (interface{}, error) {
-	result := map[string]interface{}{
-		"status":  "mocked",
-		"message": fmt.Sprintf("HTTP adapter not yet implemented for method %s", method),
-		"input":   input,
+	adapter := adapters.NewHTTPAdapter()
+	result, err := adapter.InvokeHTTP(service.Config.Endpoint, method, input)
+	if err != nil {
+		c.logger.Error().
+			Err(err).
+			Str("service_type", "http").
+			Str("method", method).
+			Str("workflow_id", workflowID).
+			Str("step_id", stepID).
+			Msg("HTTP invocation failed")
+		return nil, err
 	}
 
-	c.logger.Warn().
+	c.logger.Info().
 		Str("service_type", "http").
 		Str("method", method).
 		Str("workflow_id", workflowID).
 		Str("step_id", stepID).
-		Msg("Using mock HTTP response")
+		Interface("result", result).
+		Msg("HTTP invocation successful")
 
 	return result, nil
 }

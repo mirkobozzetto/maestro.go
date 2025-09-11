@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # FastAPI avec adaptateur gRPC
+  fastapi-service:
+    build:
+      context: ./examples/services/python
+      dockerfile: Dockerfile.fastapi
+    ports:
+      - "8000:8000"  # API HTTP
+      - "50051:50051"  # gRPC
+    environment:
+      - FASTAPI_URL=http://localhost:8000
+    networks:
+      - maestro-network
+
+  # Next.js avec adaptateur gRPC  
+  nextjs-service:
+    build:
+      context: ./examples/services/node
+      dockerfile: Dockerfile.nextjs
+    ports:
+      - "3000:3000"  # API HTTP
+      - "50052:50052"  # gRPC
+    environment:
+      - NEXTJS_URL=http://localhost:3000
+    networks:
+      - maestro-network
+
+  # Mock services pour tests rapides
+  mock-auth:
+    image: alpine
+    command: sh -c "while true; do echo 'Mock auth service'; sleep 60; done"
+    networks:
+      - maestro-network
+
+  mock-billing:
+    image: alpine  
+    command: sh -c "while true; do echo 'Mock billing service'; sleep 60; done"
+    networks:
+      - maestro-network
+
+networks:
+  maestro-network:
+    driver: bridge
