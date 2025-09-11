@@ -55,6 +55,9 @@ tmp/
 test-data/
 *.test.yaml
 
+# Example services (use your own APIs)
+examples/services/
+
 # Build artifacts
 dist/
 *.tar.gz
