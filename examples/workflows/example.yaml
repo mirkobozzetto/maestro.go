@@ -1,0 +1,63 @@
+# Example Maestro Workflow
+# This shows all the main features: sequential, parallel, conditional steps
+
+name: example_workflow
+version: "1.0"
+timeout: 30s
+
+# Define your services (HTTP or gRPC)
+services:
+  api:
+    type: http
+    endpoint: "http://localhost:8000"
+    timeout: 5s
+    retry:
+      attempts: 3
+      backoff: exponential
+
+  grpc_service:
+    type: grpc
+    endpoint: "localhost:50051"
+    timeout: 5s
+
+# Workflow steps
+steps:
+  # Simple HTTP call
+  - id: call_api
+    service: api
+    method: POST /users
+    input:
+      email: "{{ .input.email }}"
+      name: "{{ .input.name }}"
+    output: user
+    compensate:  # Rollback if later steps fail
+      method: DELETE /users/{{ .user.id }}
+
+  # Parallel execution
+  - parallel:
+      - id: task1
+        service: api
+        method: POST /task1
+        input:
+          user_id: "{{ .user.id }}"
+        output: result1
+
+      - id: task2
+        service: api
+        method: POST /task2
+        input:
+          user_id: "{{ .user.id }}"
+        output: result2
+
+  # Conditional step
+  - id: premium_feature
+    when: "{{ .input.plan == 'premium' }}"
+    service: api
+    method: POST /premium
+    input:
+      user_id: "{{ .user.id }}"
+
+# Workflow output
+output:
+  user_id: "{{ .user.id }}"
+  status: "completed"

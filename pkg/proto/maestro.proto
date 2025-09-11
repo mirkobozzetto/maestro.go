@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package maestro.v1;
+
+option go_package = "github.com/maestro/maestro.go/pkg/proto;proto";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+service Orchestrator {
+  rpc ExecuteWorkflow(ExecuteRequest) returns (ExecuteResponse);
+  rpc ExecuteWorkflowStream(ExecuteRequest) returns (stream ExecuteEvent);
+  rpc GetWorkflowStatus(StatusRequest) returns (StatusResponse);
+  rpc CancelWorkflow(CancelRequest) returns (CancelResponse);
+}
+
+service MaestroService {
+  rpc Execute(ServiceRequest) returns (ServiceResponse);
+  rpc Compensate(ServiceRequest) returns (ServiceResponse);
+  rpc HealthCheck(Empty) returns (HealthStatus);
+}
+
+message Empty {}
+
+message ExecuteRequest {
+  string workflow_name = 1;
+  google.protobuf.Struct input = 2;
+  string idempotency_key = 3;
+  map<string, string> metadata = 4;
+}
+
+message ExecuteResponse {
+  string workflow_id = 1;
+  WorkflowStatus status = 2;
+  google.protobuf.Struct output = 3;
+  string error = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+message ExecuteEvent {
+  string workflow_id = 1;
+  string step_id = 2;
+  EventType type = 3;
+  string message = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  google.protobuf.Struct data = 6;
+}
+
+message StatusRequest {
+  string workflow_id = 1;
+}
+
+message StatusResponse {
+  string workflow_id = 1;
+  WorkflowStatus status = 2;
+  repeated StepStatus steps = 3;
+  google.protobuf.Struct output = 4;
+  string error = 5;
+}
+
+message CancelRequest {
+  string workflow_id = 1;
+  string reason = 2;
+}
+
+message CancelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ServiceRequest {
+  string method = 1;
+  google.protobuf.Any payload = 2;
+  map<string, string> headers = 3;
+  string correlation_id = 4;
+  string workflow_id = 5;
+  string step_id = 6;
+}
+
+message ServiceResponse {
+  bool success = 1;
+  google.protobuf.Any data = 2;
+  string error = 3;
+  map<string, string> metadata = 4;
+}
+
+message HealthStatus {
+  bool healthy = 1;
+  string message = 2;
+  google.protobuf.Timestamp checked_at = 3;
+}
+
+message StepStatus {
+  string step_id = 1;
+  StepState state = 2;
+  string error = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp completed_at = 5;
+  int32 retry_count = 6;
+}
+
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNKNOWN = 0;
+  WORKFLOW_STATUS_PENDING = 1;
+  WORKFLOW_STATUS_RUNNING = 2;
+  WORKFLOW_STATUS_SUCCESS = 3;
+  WORKFLOW_STATUS_FAILED = 4;
+  WORKFLOW_STATUS_CANCELLED = 5;
+  WORKFLOW_STATUS_COMPENSATING = 6;
+  WORKFLOW_STATUS_COMPENSATED = 7;
+}
+
+enum StepState {
+  STEP_STATE_UNKNOWN = 0;
+  STEP_STATE_PENDING = 1;
+  STEP_STATE_RUNNING = 2;
+  STEP_STATE_SUCCESS = 3;
+  STEP_STATE_FAILED = 4;
+  STEP_STATE_SKIPPED = 5;
+  STEP_STATE_COMPENSATING = 6;
+  STEP_STATE_COMPENSATED = 7;
+}
+
+enum EventType {
+  EVENT_TYPE_UNKNOWN = 0;
+  EVENT_TYPE_WORKFLOW_STARTED = 1;
+  EVENT_TYPE_WORKFLOW_COMPLETED = 2;
+  EVENT_TYPE_WORKFLOW_FAILED = 3;
+  EVENT_TYPE_STEP_STARTED = 4;
+  EVENT_TYPE_STEP_COMPLETED = 5;
+  EVENT_TYPE_STEP_FAILED = 6;
+  EVENT_TYPE_STEP_RETRY = 7;
+  EVENT_TYPE_COMPENSATION_STARTED = 8;
+  EVENT_TYPE_COMPENSATION_COMPLETED = 9;
+}

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/maestro/maestro.go/internal/orchestrator"
+	"github.com/maestro/maestro.go/internal/application"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -120,7 +120,7 @@ func executeWorkflow(workflowFile, inputJSON string) {
 		logger.Fatal().Err(err).Msg("Failed to parse input JSON")
 	}
 
-	orch := orchestrator.New(logger)
+	orch := application.New(logger)
 
 	if err := orch.LoadWorkflow(workflowFile); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to load workflow")
@@ -179,7 +179,7 @@ func validateWorkflow(workflowFile string) {
 	logger := log.With().Str("command", "validate").Logger()
 	logger.Info().Str("workflow", workflowFile).Msg("Validating workflow")
 
-	orch := orchestrator.New(logger)
+	orch := application.New(logger)
 
 	if err := orch.LoadWorkflow(workflowFile); err != nil {
 		logger.Error().Err(err).Msg("Workflow validation failed")

@@ -43,6 +43,7 @@ docs/_build/
 
 # Development files
 CLAUDE.md
+.claude/
 IMPLEMENTATION_PLAN.md
 test_*.sh
 tmp/
