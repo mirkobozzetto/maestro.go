@@ -1,0 +1,218 @@
+name: ai_document_analysis
+version: "1.0"
+timeout: 5m
+
+services:
+  document_service:
+    type: grpc
+    endpoint: "documents.internal:50051"
+    timeout: 30s
+
+  python_ai_service:
+    type: http
+    endpoint: "http://fastapi-ai.internal:8000"
+    timeout: 60s
+    retry:
+      attempts: 2
+      backoff: exponential
+
+  vector_db:
+    type: grpc
+    endpoint: "vectordb.internal:50052"
+    timeout: 20s
+
+  nodejs_processor:
+    type: http
+    endpoint: "http://nodejs-api.internal:3000"
+    timeout: 30s
+
+  legal_api:
+    type: http
+    endpoint: "https://legal.client-system.com/api/v2"
+    headers:
+      X-API-Key: "{{ env.LEGAL_API_KEY }}"
+      X-Tenant-ID: "{{ .input.tenant_id }}"
+    timeout: 45s
+
+  commercial_api:
+    type: http
+    endpoint: "https://crm.client-system.com/api"
+    headers:
+      Authorization: "Bearer {{ env.CRM_TOKEN }}"
+    timeout: 30s
+
+  audit_service:
+    type: grpc
+    endpoint: "audit.internal:50054"
+
+steps:
+  - id: fetch_document
+    service: document_service
+    method: GetDocument
+    input:
+      document_id: "{{ .input.document_id }}"
+      format: "pdf"
+    output: document
+
+  - id: extract_text
+    service: python_ai_service
+    method: POST /extract
+    input:
+      document_url: "{{ .document.url }}"
+      document_type: "{{ .input.document_type }}"
+      ocr_enabled: true
+      language: "{{ .input.language }}"
+    output: extracted_text
+    compensate:
+      method: DELETE /extraction/{{ .extracted_text.extraction_id }}
+
+  - parallel:
+      - id: generate_embeddings
+        service: python_ai_service
+        method: POST /embeddings
+        input:
+          text: "{{ .extracted_text.content }}"
+          model: "text-embedding-ada-002"
+          chunk_size: 1000
+          chunk_overlap: 200
+        output: embeddings
+
+      - id: extract_entities
+        service: python_ai_service
+        method: POST /ner
+        input:
+          text: "{{ .extracted_text.content }}"
+          entity_types:
+            - person
+            - organization
+            - location
+            - date
+            - money
+            - legal_term
+        output: entities
+
+  - id: store_vectors
+    service: vector_db
+    method: StoreVectors
+    input:
+      collection: "{{ .input.collection_name }}"
+      vectors: "{{ .embeddings.vectors }}"
+      metadata:
+        document_id: "{{ .input.document_id }}"
+        tenant_id: "{{ .input.tenant_id }}"
+        entities: "{{ .entities.extracted }}"
+    output: vector_store
+    compensate:
+      method: DeleteVectors
+      input:
+        collection: "{{ .input.collection_name }}"
+        vector_ids: "{{ .vector_store.ids }}"
+
+  - id: semantic_search
+    service: python_ai_service
+    method: POST /rag/search
+    input:
+      query: "{{ .input.analysis_query }}"
+      collection: "{{ .input.collection_name }}"
+      top_k: 10
+      filters:
+        tenant_id: "{{ .input.tenant_id }}"
+    output: search_results
+
+  - id: generate_analysis
+    service: python_ai_service
+    method: POST /rag/generate
+    input:
+      query: "{{ .input.analysis_query }}"
+      context: "{{ .search_results.documents }}"
+      model: "gpt-4"
+      temperature: 0.3
+      system_prompt: "You are a {{ .input.analysis_type }} expert analyzing documents for compliance and risk."
+    output: ai_analysis
+
+  - id: process_insights
+    service: nodejs_processor
+    method: POST /process/insights
+    input:
+      raw_analysis: "{{ .ai_analysis.response }}"
+      entities: "{{ .entities.extracted }}"
+      document_metadata:
+        id: "{{ .input.document_id }}"
+        type: "{{ .input.document_type }}"
+      formatting:
+        structure: "json"
+        include_confidence_scores: true
+        include_citations: true
+    output: processed_insights
+
+  - parallel:
+      - id: send_to_legal
+        when: "{{ .input.analysis_type == 'legal' }}"
+        service: legal_api
+        method: POST /cases/{{ .input.case_id }}/analysis
+        input:
+          analysis_id: "{{ .processed_insights.id }}"
+          document_id: "{{ .input.document_id }}"
+          risk_assessment: "{{ .processed_insights.risk_score }}"
+          compliance_issues: "{{ .processed_insights.compliance_flags }}"
+          recommendations: "{{ .processed_insights.recommendations }}"
+          entities: "{{ .processed_insights.legal_entities }}"
+        output: legal_response
+        compensate:
+          method: DELETE /cases/{{ .input.case_id }}/analysis/{{ .legal_response.analysis_id }}
+
+      - id: send_to_commercial
+        when: "{{ .input.analysis_type == 'commercial' }}"
+        service: commercial_api
+        method: POST /opportunities/{{ .input.opportunity_id }}/intelligence
+        input:
+          insights: "{{ .processed_insights.commercial_insights }}"
+          competitors: "{{ .processed_insights.competitor_mentions }}"
+          pricing_data: "{{ .processed_insights.pricing_info }}"
+          decision_factors: "{{ .processed_insights.decision_factors }}"
+          next_actions: "{{ .processed_insights.suggested_actions }}"
+        output: commercial_response
+
+      - id: update_knowledge_base
+        service: nodejs_processor
+        method: POST /knowledge/update
+        input:
+          tenant_id: "{{ .input.tenant_id }}"
+          document_id: "{{ .input.document_id }}"
+          insights: "{{ .processed_insights.key_points }}"
+          entities: "{{ .entities.extracted }}"
+          embeddings_ref: "{{ .vector_store.ids }}"
+        output: knowledge_update
+
+  - id: generate_client_report
+    service: nodejs_processor
+    method: POST /reports/generate
+    input:
+      tenant_id: "{{ .input.tenant_id }}"
+      analysis_results:
+        ai_insights: "{{ .processed_insights }}"
+        legal_status: "{{ .legal_response.status }}"
+        commercial_status: "{{ .commercial_response.status }}"
+      format: "{{ .input.report_format }}"
+      language: "{{ .input.language }}"
+      include_visualizations: true
+    output: report
+
+  - id: log_analysis
+    service: audit_service
+    method: LogAnalysis
+    input:
+      tenant_id: "{{ .input.tenant_id }}"
+      document_id: "{{ .input.document_id }}"
+      analysis_type: "{{ .input.analysis_type }}"
+      tokens_used: "{{ .ai_analysis.tokens }}"
+      processing_time: "{{ .execution_time }}"
+      client_system: "{{ .input.analysis_type == 'legal' ? 'legal.client-system.com' : 'crm.client-system.com' }}"
+
+output:
+  analysis_id: "{{ .processed_insights.id }}"
+  report_url: "{{ .report.url }}"
+  vector_ids: "{{ .vector_store.ids }}"
+  legal_case_updated: "{{ .legal_response.updated }}"
+  commercial_opportunity_updated: "{{ .commercial_response.updated }}"
+  tokens_consumed: "{{ .ai_analysis.tokens }}"

@@ -1,0 +1,270 @@
+name: kubernetes_deployment_pipeline
+version: "1.0"
+timeout: 15m
+
+services:
+  github:
+    type: http
+    endpoint: "https://api.github.com"
+    headers:
+      Authorization: "Bearer {{ env.GITHUB_TOKEN }}"
+    timeout: 30s
+
+  ci_runner:
+    type: grpc
+    endpoint: "ci-runner.internal:50051"
+    timeout: 5m
+    retry:
+      attempts: 2
+      backoff: exponential
+
+  sonarqube:
+    type: http
+    endpoint: "https://sonar.internal.company.com"
+    headers:
+      Authorization: "Basic {{ env.SONAR_TOKEN }}"
+    timeout: 2m
+
+  docker_registry:
+    type: grpc
+    endpoint: "registry.internal:50052"
+    timeout: 3m
+
+  kubernetes_api:
+    type: grpc
+    endpoint: "k8s-controller.internal:50053"
+    timeout: 2m
+    retry:
+      attempts: 3
+      backoff: exponential
+
+  datadog:
+    type: http
+    endpoint: "https://api.datadoghq.com/api/v1"
+    headers:
+      DD-API-KEY: "{{ env.DD_API_KEY }}"
+      DD-APPLICATION-KEY: "{{ env.DD_APP_KEY }}"
+    timeout: 10s
+
+  slack:
+    type: http
+    endpoint: "https://slack.com/api"
+    headers:
+      Authorization: "Bearer {{ env.SLACK_BOT_TOKEN }}"
+    timeout: 5s
+
+steps:
+  - id: create_deployment_branch
+    service: github
+    method: POST /repos/{{ .input.repo }}/git/refs
+    input:
+      ref: "refs/heads/deploy/{{ .input.version }}"
+      sha: "{{ .input.commit_sha }}"
+    output: branch
+    compensate:
+      method: DELETE /repos/{{ .input.repo }}/git/refs/heads/deploy/{{ .input.version }}
+
+  - parallel:
+      - id: run_tests
+        service: ci_runner
+        method: RunTestSuite
+        input:
+          repo: "{{ .input.repo }}"
+          branch: "deploy/{{ .input.version }}"
+          test_suites:
+            - unit
+            - integration
+            - e2e
+          parallel_jobs: 4
+        output: test_results
+
+      - id: security_scan
+        service: sonarqube
+        method: POST /api/ce/submit
+        input:
+          projectKey: "{{ .input.project_key }}"
+          projectName: "{{ .input.repo }}"
+          projectBranch: "deploy/{{ .input.version }}"
+        output: scan_results
+
+  - id: quality_gate
+    when: "{{ .test_results.passed && .scan_results.qualityGate == 'OK' }}"
+    service: ci_runner
+    method: ValidateQualityGates
+    input:
+      coverage: "{{ .test_results.coverage }}"
+      min_coverage: 80
+      vulnerabilities: "{{ .scan_results.vulnerabilities }}"
+      max_vulnerabilities: 0
+    output: validation
+
+  - id: build_container
+    service: docker_registry
+    method: BuildAndPush
+    input:
+      dockerfile: "{{ .input.dockerfile_path }}"
+      context: "{{ .input.repo }}"
+      tags:
+        - "{{ .input.version }}"
+        - "{{ .input.environment }}-latest"
+        - "sha-{{ .input.commit_sha }}"
+      build_args:
+        VERSION: "{{ .input.version }}"
+        COMMIT: "{{ .input.commit_sha }}"
+        BUILD_DATE: "{{ .timestamp }}"
+    output: container
+    compensate:
+      method: DeleteImage
+      input:
+        image_id: "{{ .container.digest }}"
+
+  - id: scan_container
+    service: docker_registry
+    method: SecurityScan
+    input:
+      image: "{{ .container.image }}:{{ .input.version }}"
+      scan_type: "vulnerability"
+      severity_threshold: "HIGH"
+    output: container_scan
+
+  - id: deploy_staging
+    when: "{{ .input.environment == 'staging' || .input.environment == 'production' }}"
+    service: kubernetes_api
+    method: RollingUpdate
+    input:
+      namespace: "{{ .input.environment }}"
+      deployment: "{{ .input.service_name }}"
+      image: "{{ .container.image }}:{{ .input.version }}"
+      replicas: "{{ .input.environment == 'production' ? 10 : 3 }}"
+      strategy:
+        max_surge: 2
+        max_unavailable: 1
+      health_check:
+        path: "/health"
+        interval: 10
+        timeout: 5
+        retries: 3
+    output: staging_deployment
+    compensate:
+      method: Rollback
+      input:
+        namespace: "{{ .input.environment }}"
+        deployment: "{{ .input.service_name }}"
+        revision: "{{ .staging_deployment.previous_revision }}"
+
+  - id: smoke_tests
+    service: ci_runner
+    method: RunSmokeTests
+    input:
+      environment: "{{ .input.environment }}"
+      endpoints:
+        - "https://{{ .input.environment }}-api.company.com/health"
+        - "https://{{ .input.environment }}-api.company.com/version"
+      expected_version: "{{ .input.version }}"
+      test_users: "{{ .input.environment == 'production' ? 'synthetic' : 'test' }}"
+    output: smoke_results
+
+  - parallel:
+      - id: configure_monitoring
+        service: datadog
+        method: POST /monitor
+        input:
+          type: "service check"
+          name: "{{ .input.service_name }}-{{ .input.environment }}-deployment"
+          query: "avg(last_5m):avg:kubernetes.deployment.replicas.available{deployment:{{ .input.service_name }},env:{{ .input.environment }}} < 2"
+          message: "Deployment {{ .input.service_name }} has less than 2 available replicas"
+          tags:
+            - "env:{{ .input.environment }}"
+            - "service:{{ .input.service_name }}"
+            - "version:{{ .input.version }}"
+        output: monitor
+
+      - id: update_feature_flags
+        when: "{{ .input.feature_flags != null }}"
+        service: ci_runner
+        method: UpdateFeatureFlags
+        input:
+          environment: "{{ .input.environment }}"
+          flags: "{{ .input.feature_flags }}"
+          rollout_percentage: "{{ .input.environment == 'production' ? 10 : 100 }}"
+        output: feature_flags
+
+  - id: production_canary
+    when: "{{ .input.environment == 'production' && .smoke_results.passed }}"
+    service: kubernetes_api
+    method: CanaryDeployment
+    input:
+      namespace: "production"
+      deployment: "{{ .input.service_name }}"
+      image: "{{ .container.image }}:{{ .input.version }}"
+      canary_percentage: 10
+      duration_minutes: 30
+      metrics_threshold:
+        error_rate: 0.01
+        p99_latency: 500
+        success_rate: 0.99
+    output: canary_result
+    compensate:
+      method: AbortCanary
+      input:
+        namespace: "production"
+        deployment: "{{ .input.service_name }}"
+
+  - id: full_production_rollout
+    when: "{{ .input.environment == 'production' && .canary_result.passed }}"
+    service: kubernetes_api
+    method: CompleteRollout
+    input:
+      namespace: "production"
+      deployment: "{{ .input.service_name }}"
+      image: "{{ .container.image }}:{{ .input.version }}"
+      replicas: 10
+    output: production_deployment
+
+  - parallel:
+      - id: create_release_notes
+        service: github
+        method: POST /repos/{{ .input.repo }}/releases
+        input:
+          tag_name: "v{{ .input.version }}"
+          target_commitish: "{{ .input.commit_sha }}"
+          name: "Release {{ .input.version }}"
+          body: "{{ .input.release_notes }}"
+          draft: false
+          prerelease: "{{ .input.environment != 'production' }}"
+        output: release
+
+      - id: notify_slack
+        service: slack
+        method: POST /chat.postMessage
+        input:
+          channel: "{{ .input.environment == 'production' ? '#deployments-prod' : '#deployments-staging' }}"
+          text: "Deployment Complete"
+          blocks:
+            - type: "header"
+              text:
+                type: "plain_text"
+                text: "{{ .input.service_name }} v{{ .input.version }} deployed to {{ .input.environment }}"
+            - type: "section"
+              fields:
+                - type: "mrkdwn"
+                  text: "*Version:* {{ .input.version }}"
+                - type: "mrkdwn"
+                  text: "*Environment:* {{ .input.environment }}"
+                - type: "mrkdwn"
+                  text: "*Commit:* <https://github.com/{{ .input.repo }}/commit/{{ .input.commit_sha }}|{{ .input.commit_sha }}>"
+                - type: "mrkdwn"
+                  text: "*Status:* ✅ Success"
+            - type: "section"
+              text:
+                type: "mrkdwn"
+                text: "*Test Results:* {{ .test_results.passed_count }}/{{ .test_results.total_count }} passed ({{ .test_results.coverage }}% coverage)"
+
+output:
+  deployment_id: "{{ .production_deployment.id }}"
+  version: "{{ .input.version }}"
+  environment: "{{ .input.environment }}"
+  container_image: "{{ .container.image }}:{{ .input.version }}"
+  release_url: "{{ .release.html_url }}"
+  monitoring_dashboard: "https://app.datadoghq.com/dashboard/{{ .monitor.id }}"
+  rollback_revision: "{{ .production_deployment.previous_revision }}"
