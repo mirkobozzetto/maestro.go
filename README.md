@@ -1,49 +1,137 @@
-# Maestro.go - Polyglot API Orchestrator
+# Maestro.go
 
-## Overview
-
-Maestro.go is a powerful orchestrator that coordinates API services written in different languages (Python, Node.js, Go, etc.) using gRPC as the unified communication protocol. It executes workflows defined in YAML, handling retries, compensations, and distributed transactions automatically.
+Polyglot API orchestrator that coordinates services written in different languages using gRPC and HTTP.
 
 ## Features
 
-- **Workflow Orchestration**: Execute complex workflows with sequential, parallel, and conditional steps
-- **Saga Pattern**: Automatic compensation and rollback for distributed transactions
-- **Retry Logic**: Configurable exponential backoff for transient failures
-- **Circuit Breaker**: Fault tolerance with automatic service health management
-- **Polyglot Support**: Integrate services written in any language via gRPC or HTTP
-- **Structured Logging**: Detailed execution logs with correlation IDs
-- **Connection Pooling**: Efficient resource management for high throughput
+- Workflow orchestration with YAML definitions
+- Saga pattern for distributed transactions
+- Automatic retry with exponential backoff
+- Circuit breaker for fault tolerance
+- Support for gRPC and HTTP services
+- Template resolution for dynamic values
+- Compensation for rollback operations
+
+## Installation
+
+```bash
+# Install tools
+make install-tools
+
+# Build
+make build
+
+# Run tests
+make test
+```
 
 ## Quick Start
 
 ```bash
 # Build
-go build -o bin/maestro ./cmd/maestro
-
-# Validate workflow
-./bin/maestro validate examples/workflows/user_onboarding.yaml
+make build
 
 # Execute workflow
-./bin/maestro execute examples/workflows/user_onboarding.yaml \
-  --input '{"email":"test@example.com","name":"John"}'
+./maestro execute payment-workflow.yaml --input '{"order_id":"ORD-2024-001","amount":299.99}'
+
+# Start server mode
+./maestro serve --port 8080
 ```
 
-## Workflow Example
+## Use Case Example
+
+Multi-service user onboarding workflow:
 
 ```yaml
-name: my_workflow
+name: user_onboarding
 version: "1.0"
 
 services:
-  api:
+  auth_service:
+    type: grpc
+    endpoint: "auth-service:50051"
+    
+  billing_service:
+    type: grpc
+    endpoint: "billing-service:50052"
+    
+  crm_service:
     type: http
-    endpoint: "http://localhost:8000"
+    endpoint: "http://crm-api:8080"
+    
+  email_service:
+    type: grpc
+    endpoint: "email-service:50053"
 
 steps:
-  - id: call_api
-    service: api
-    method: POST /users
+  - id: create_user
+    service: auth_service
+    method: CreateUser
     input:
       email: "{{ .input.email }}"
-    output: result
+      password: "{{ .input.password }}"
+    output: user
+    
+  - id: setup_subscription
+    service: billing_service
+    method: CreateSubscription
+    input:
+      user_id: "{{ .user.id }}"
+      plan: "{{ .input.plan }}"
+    output: subscription
+    compensate:
+      method: CancelSubscription
+      input:
+        subscription_id: "{{ .subscription.id }}"
+    
+  - id: add_to_crm
+    service: crm_service
+    method: POST /contacts
+    input:
+      user_id: "{{ .user.id }}"
+      email: "{{ .input.email }}"
+      subscription_tier: "{{ .subscription.tier }}"
+    output: crm_contact
+    compensate:
+      method: DELETE /contacts/{{ .crm_contact.id }}
+    
+  - id: send_welcome_email
+    service: email_service
+    method: SendTemplate
+    input:
+      to: "{{ .input.email }}"
+      template: "welcome"
+      vars:
+        name: "{{ .input.name }}"
+        plan: "{{ .subscription.plan_name }}"
+
+output:
+  user_id: "{{ .user.id }}"
+  subscription_id: "{{ .subscription.id }}"
+```
+
+If any step fails, compensations run in reverse order to clean up.
+
+## Architecture
+
+```
+cmd/maestro/          - CLI application
+internal/
+  application/        - Orchestration logic
+  domain/            - Core domain models
+  infrastructure/    - gRPC/HTTP adapters
+pkg/proto/           - Protocol buffer definitions
+```
+
+## Development
+
+```bash
+# Generate protobuf
+make proto
+
+# Run with debug logging
+./maestro execute workflow.yaml --debug
+
+# Run benchmarks
+make bench
 ```
