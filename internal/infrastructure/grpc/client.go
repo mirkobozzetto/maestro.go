@@ -2,10 +2,10 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
+	ctxkeys "github.com/maestro/maestro.go/internal/context"
 	adapters "github.com/maestro/maestro.go/internal/infrastructure/http"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
@@ -52,7 +52,7 @@ func (c *DynamicClient) InvokeMethod(
 func (c *DynamicClient) invokeGRPC(
 	ctx context.Context,
 	serviceName string,
-	service *ServiceEntry,
+	_ *ServiceEntry,
 	method string,
 	input map[string]interface{},
 	workflowID string,
@@ -136,7 +136,7 @@ func (c *DynamicClient) invokeGRPC(
 }
 
 func (c *DynamicClient) invokeHTTP(
-	ctx context.Context,
+	_ context.Context,
 	service *ServiceEntry,
 	method string,
 	input map[string]interface{},
@@ -179,9 +179,9 @@ func (c *DynamicClient) InvokeWithOptions(
 	ctx context.Context,
 	serviceName string,
 	method string,
-	input map[string]interface{},
+	input map[string]any,
 	opts InvocationOptions,
-) (interface{}, error) {
+) (any, error) {
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -189,16 +189,16 @@ func (c *DynamicClient) InvokeWithOptions(
 	}
 
 	workflowID := ""
-	if val := ctx.Value("workflow_id"); val != nil {
+	if val := ctx.Value(ctxkeys.WorkflowID); val != nil {
 		workflowID = val.(string)
 	}
 
 	stepID := ""
-	if val := ctx.Value("step_id"); val != nil {
+	if val := ctx.Value(ctxkeys.StepID); val != nil {
 		stepID = val.(string)
 	}
 
-	var result interface{}
+	var result any
 	var err error
 
 	for attempt := 0; attempt <= opts.RetryAttempts; attempt++ {
@@ -227,16 +227,4 @@ func isRetryableError(err error) bool {
 		}
 	}
 	return false
-}
-
-func marshalInput(input map[string]interface{}) ([]byte, error) {
-	return json.Marshal(input)
-}
-
-func unmarshalResponse(data []byte) (map[string]interface{}, error) {
-	var result map[string]interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
 }

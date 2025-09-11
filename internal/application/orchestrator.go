@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/maestro/maestro.go/internal/application/executor"
+	ctxkeys "github.com/maestro/maestro.go/internal/context"
 	workflow "github.com/maestro/maestro.go/internal/domain"
 	"github.com/maestro/maestro.go/internal/infrastructure/grpc"
 	"github.com/rs/zerolog"
@@ -16,7 +18,7 @@ type Orchestrator struct {
 	mu               sync.RWMutex
 	workflows        map[string]*workflow.Workflow
 	parser           *Parser
-	executor         *Executor
+	executor         *executor.Executor
 	sagaCoordinator  *SagaCoordinator
 	registry         *grpc.ServiceRegistry
 	logger           zerolog.Logger
@@ -25,13 +27,13 @@ type Orchestrator struct {
 
 func New(logger zerolog.Logger) *Orchestrator {
 	registry := grpc.NewServiceRegistry()
-	executor := NewExecutor(registry, logger)
-	sagaCoordinator := NewSagaCoordinator(executor, logger)
+	exec := executor.NewExecutor(registry, logger)
+	sagaCoordinator := NewSagaCoordinator(exec, logger)
 
 	return &Orchestrator{
 		workflows:       make(map[string]*workflow.Workflow),
 		parser:          NewParser(),
-		executor:        executor,
+		executor:        exec,
 		sagaCoordinator: sagaCoordinator,
 		registry:        registry,
 		logger:          logger,
@@ -100,8 +102,8 @@ func (o *Orchestrator) ExecuteWorkflow(
 		defer cancel()
 	}
 
-	ctx = context.WithValue(ctx, "workflow_id", workflowID)
-	ctx = context.WithValue(ctx, "workflow_name", workflowName)
+	ctx = context.WithValue(ctx, ctxkeys.WorkflowID, workflowID)
+	ctx = context.WithValue(ctx, ctxkeys.WorkflowName, workflowName)
 
 	startedAt := time.Now()
 	result := &workflow.WorkflowResult{

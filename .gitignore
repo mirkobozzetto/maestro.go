@@ -63,3 +63,4 @@ examples/services/
 dist/
 *.tar.gz
 *.zip
+maestro

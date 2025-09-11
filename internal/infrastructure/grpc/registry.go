@@ -64,9 +64,10 @@ func (r *ServiceRegistry) RegisterService(name string, config *domain.Service) e
 			return counts.Requests >= 3 && failureRatio >= 0.6
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			if to == gobreaker.StateOpen {
+			switch to {
+			case gobreaker.StateOpen:
 				entry.Healthy = false
-			} else if to == gobreaker.StateClosed {
+			case gobreaker.StateClosed:
 				entry.Healthy = true
 			}
 		},

@@ -4,16 +4,18 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/maestro/maestro.go/internal/application/executor"
+	ctxkeys "github.com/maestro/maestro.go/internal/context"
 	"github.com/maestro/maestro.go/internal/domain"
 	"github.com/rs/zerolog"
 )
 
 type SagaCoordinator struct {
-	executor *Executor
+	executor *executor.Executor
 	logger   zerolog.Logger
 }
 
-func NewSagaCoordinator(executor *Executor, logger zerolog.Logger) *SagaCoordinator {
+func NewSagaCoordinator(executor *executor.Executor, logger zerolog.Logger) *SagaCoordinator {
 	return &SagaCoordinator{
 		executor: executor,
 		logger:   logger,
@@ -30,7 +32,10 @@ func (s *SagaCoordinator) Compensate(
 		return nil
 	}
 
-	workflowID := ctx.Value("workflow_id").(string)
+	workflowID := ""
+	if val := ctx.Value(ctxkeys.WorkflowID); val != nil {
+		workflowID = val.(string)
+	}
 	logger := s.logger.With().
 		Str("workflow_id", workflowID).
 		Int("steps_to_compensate", len(execCtx.ExecutedSteps)).
