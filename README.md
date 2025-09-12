@@ -2,6 +2,18 @@
 
 Polyglot API orchestrator that coordinates services written in different languages using gRPC and HTTP.
 
+## When to Use Maestro
+
+**Not for simple workflows** - If you just need to chain 3 API calls, use a message queue (RabbitMQ, Redis).
+
+Maestro is designed for **complex orchestration** where queues become a nightmare:
+
+- **Multi-branch workflows** with conditional logic (if X then Y else Z)
+- **Parallel execution** with synchronization (call 5 APIs simultaneously, wait for all)
+- **Different compensation per step** (not just "undo", but specific rollback actions)
+- **Stateful recovery** - Resume exactly where it crashed after failures
+- **Business-readable workflows** - Non-developers can understand YAML definitions
+
 ## Features
 
 - Workflow orchestration with YAML definitions
@@ -41,79 +53,71 @@ make build
 ./maestro execute workflow.yaml --input-file input.json
 ```
 
-## Use Case Example
+## Complex Workflow Example
 
-Multi-service user onboarding workflow:
+Bank loan processing with parallel checks and conditional approval:
 
 ```yaml
-name: user_onboarding
+name: loan_processing
 version: "1.0"
 
-services:
-  auth_service:
-    type: grpc
-    endpoint: "auth-service:50051"
-
-  billing_service:
-    type: grpc
-    endpoint: "billing-service:50052"
-
-  crm_service:
-    type: http
-    endpoint: "http://crm-api:8080"
-
-  email_service:
-    type: grpc
-    endpoint: "email-service:50053"
-
 steps:
-  - id: create_user
-    service: auth_service
-    method: CreateUser
-    input:
-      email: "{{ .input.email }}"
-      password: "{{ .input.password }}"
-    output: user
+  - id: verify_identity
+    service: kyc_service
+    method: VerifyIdentity
+    output: identity
 
-  - id: setup_subscription
-    service: billing_service
-    method: CreateSubscription
-    input:
-      user_id: "{{ .user.id }}"
-      plan: "{{ .input.plan }}"
-    output: subscription
+  - parallel:
+      - id: credit_check
+        service: credit_bureau
+        method: GetCreditScore
+        output: credit_score
+        
+      - id: income_verification
+        service: employer_api
+        method: VerifyIncome
+        output: income
+        
+      - id: fraud_check
+        service: fraud_detection
+        method: AnalyzeRisk
+        output: fraud_risk
+
+  - id: auto_approve
+    when: "{{ .credit_score.value > 700 && .fraud_risk.level == 'low' }}"
+    service: loan_service
+    method: AutoApprove
+    output: approval
     compensate:
-      method: CancelSubscription
+      method: CancelApproval
       input:
-        subscription_id: "{{ .subscription.id }}"
+        loan_id: "{{ .approval.loan_id }}"
 
-  - id: add_to_crm
-    service: crm_service
-    method: POST /contacts
+  - id: manual_review
+    when: "{{ .credit_score.value > 600 && .credit_score.value <= 700 }}"
+    service: review_queue
+    method: CreateReviewTask
     input:
-      user_id: "{{ .user.id }}"
-      email: "{{ .input.email }}"
-      subscription_tier: "{{ .subscription.tier }}"
-    output: crm_contact
-    compensate:
-      method: DELETE /contacts/{{ .crm_contact.id }}
+      priority: "{{ .fraud_risk.level == 'high' ? 'urgent' : 'normal' }}"
+    output: review_task
 
-  - id: send_welcome_email
-    service: email_service
-    method: SendTemplate
+  - id: reject
+    when: "{{ .credit_score.value <= 600 }}"
+    service: loan_service
+    method: RejectApplication
+    output: rejection
+
+  - id: generate_contract
+    when: "{{ .approval.status == 'approved' }}"
+    service: document_service
+    method: GenerateContract
     input:
-      to: "{{ .input.email }}"
-      template: "welcome"
-      vars:
-        name: "{{ .input.name }}"
-        plan: "{{ .subscription.plan_name }}"
-
-output:
-  user_id: "{{ .user.id }}"
-  subscription_id: "{{ .subscription.id }}"
+      terms: "{{ .approval.terms }}"
+      rate: "{{ .approval.interest_rate }}"
+    output: contract
 ```
 
-If any step fails, compensations run in reverse order to clean up.
+This shows why Maestro exists: parallel execution, conditional branches, and specific compensations per step - impossible to manage with simple queues.
 
 ## Architecture
 
