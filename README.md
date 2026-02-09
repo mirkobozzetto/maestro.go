@@ -30,6 +30,9 @@ Your services stay independent. They don't know about each other. They don't kno
 
 Every orchestration tool solves the same fundamental problem: making multiple services work together reliably. They differ in what they ask from you in return.
 
+**Maestro** — _"Glue your services into workflows that survive failure"_
+No cluster. No database. No SDK to integrate into your services. A single Go binary that reads a YAML file and coordinates your existing services over gRPC and HTTP. Your services don't need to know Maestro exists — they just need an API.
+
 **Temporal** — _"What if your code never failed?"_
 The most powerful option. Workflows survive server restarts, run for months, and recover from any failure. But you need to deploy a Temporal cluster with a database (Cassandra or PostgreSQL), learn their SDK, and write your workflows in code (Go, Java, Python, TypeScript). It's the right choice for mission-critical, long-running operations. It's overkill when your workflow takes 10 seconds.
 
@@ -38,9 +41,6 @@ Netflix-born, battle-tested at scale. JSON-based workflow definitions, visual ed
 
 **Kestra** — _"Language-agnostic orchestration platform"_
 YAML-based like Maestro, with 600+ plugins and a visual editor. Needs a server and a database. Oriented toward data pipelines and scheduled jobs more than real-time service orchestration.
-
-**Maestro** — _"Glue your services into workflows that survive failure"_
-No cluster. No database. No SDK to integrate into your services. A single Go binary that reads a YAML file and coordinates your existing services over gRPC and HTTP. Your services don't need to know Maestro exists — they just need an API.
 
 The tradeoff is clear: Maestro won't survive a server restart. There's no persistent state, no visual dashboard, no plugin ecosystem. If your workflows run for seconds or minutes and you need something that works without ops overhead, Maestro is for that. If you need workflows that run for days and must survive infrastructure failures, use Temporal.
 
