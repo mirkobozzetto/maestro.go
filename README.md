@@ -30,7 +30,7 @@ Your services stay independent. They don't know about each other. They don't kno
 
 Every orchestration tool solves the same fundamental problem: making multiple services work together reliably. They differ in what they ask from you in return.
 
-**Maestro.go.go** — _"Glue your services into workflows that survive failure"_
+**Maestro.go** — _"Glue your services into workflows that survive failure"_
 No cluster. No database. No SDK to integrate into your services. A single Go binary that reads a YAML file and coordinates your existing services over gRPC and HTTP. Your services don't need to know Maestro.go exists — they just need an API.
 
 **Temporal** — _"What if your code never failed?"_
