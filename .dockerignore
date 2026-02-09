@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+bin/
+maestro
+
+# Test files
+test-setup/
+*.test
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+
+# Temporary files
+*.tmp
+tmp/
+
+# Logs
+*.log
+
+# Coverage
+coverage.*
+
+# Claude
+.claude/
+CLAUDE.md
