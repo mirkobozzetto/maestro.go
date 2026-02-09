@@ -8,7 +8,7 @@ Modern backends aren't written in one language. You use Go or Rust where you nee
 
 But these services need to work together. A request comes in and triggers a chain of operations across 3, 5, 10 different services — some in sequence, some in parallel. The output of one feeds into the next. When something breaks halfway through, the services that already ran need to clean up after themselves.
 
-That's where the glue code starts. You write `if err != nil` chains, retry loops, timeout handling, rollback logic. It works for 2 services. At 5 services with parallel branches and conditional logic, it becomes the most fragile part of your stack — the part nobody wants to touch.
+So you write the glue yourself. Error handling between every call, retry logic, timeouts, cleanup when something fails halfway. It holds together when you're connecting 2 services. But at 5 services with parallel branches and conditional paths, that glue becomes the most fragile part of your entire stack — and the part nobody wants to touch.
 
 ## What "Glue" Actually Means
 
